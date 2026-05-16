@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Bramble & Brew
 
-## Getting Started
+> Slow coffee. Real conversations.
 
-First, run the development server:
+A portfolio demo site for a fictional third-wave coffee shop in Galway's Latin Quarter. Built to showcase modern web craft alongside a polished, production-shaped AI chatbot that small-business clients would actually pay for.
+
+## What's interesting
+
+- **AI barista chatbot** (Vercel AI SDK + OpenAI tool calling) embedded in the bottom-right corner. Knows the menu, beans, hours, FAQs — and can book cupping sessions and take bean orders end-to-end, persisting both to Supabase.
+- **Hidden `/admin` view** (password `demo123`) surfaces every conversation, booking, and order — proving the bot captures real business value, not just nice chats.
+- **Hand-built warm design system** in Tailwind v4 (`@theme` config-in-CSS), Fraunces serif display + Inter body, Framer Motion interactions.
+- **Single source of truth** in `src/lib/cafe-data.ts` — the marketing UI and the bot's system prompt both read from the same file, so the bot can never quote a stale price.
+
+## Stack
+
+| | |
+|---|---|
+| Framework | Next.js 14 App Router, TypeScript strict |
+| Styling | Tailwind CSS v4, custom coffee palette |
+| Animation | Framer Motion |
+| AI | Vercel AI SDK v6, OpenAI `gpt-4o-mini`, tool calls |
+| DB | Supabase (postgres) — conversations, bookings, orders |
+| UI | Radix primitives, Lucide icons, Sonner, Vaul |
+| Hosting | Vercel |
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+
+# 1. Supabase: Dashboard → SQL Editor → paste supabase/migrations/0001_init.sql
+# 2. Copy env template and fill keys
+cp .env.example .env.local
+#    NEXT_PUBLIC_SUPABASE_URL
+#    NEXT_PUBLIC_SUPABASE_ANON_KEY
+#    SUPABASE_SERVICE_ROLE_KEY
+#    OPENAI_API_KEY   (optional; chatbot falls back to a scripted stub without it)
+
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. The chatbot is in the bottom-right; `/admin` is gated by `demo123`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Notable files
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `src/lib/cafe-data.ts` — the cafe in one file
+- `src/lib/chat/system-prompt.ts` — bot persona built from the data above
+- `src/lib/chat/tools.ts` — `book_cupping_session`, `place_bean_order`
+- `src/app/api/chat/route.ts` — streaming chat endpoint
+- `src/components/chat/` — floating button + panel + bubbles
+- `src/app/admin/page.tsx` — the captured-value dashboard
 
-## Learn More
+## License
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Portfolio demo — feel free to take inspiration.

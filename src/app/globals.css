@@ -1,27 +1,172 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* Coffee palette — warm cream / deep coffee / saddle brown */
+  --color-background: #faf7f2;
+  --color-foreground: #2d1f14;
+
+  --color-primary: #6f4e37;
+  --color-primary-foreground: #faf7f2;
+
+  --color-accent: #d4a574;
+  --color-accent-foreground: #2d1f14;
+
+  --color-muted: #efe7da;
+  --color-muted-foreground: #6b5848;
+
+  --color-card: #fffcf7;
+  --color-card-foreground: #2d1f14;
+
+  --color-border: #e8ddd0;
+  --color-input: #e8ddd0;
+  --color-ring: #6f4e37;
+
+  --color-success: #4f7a3a;
+  --color-success-foreground: #faf7f2;
+
+  /* Typography */
+  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-inter);
+
+  /* Radii */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+
+  /* Easing for premium feel */
+  --ease-cafe: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: var(--color-border);
   }
-}
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system,
+      "Segoe UI", Roboto, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-primary) 25%, transparent);
+    color: var(--color-foreground);
+  }
+
+  h1, h2, h3, h4, h5 {
+    font-family: var(--font-display), ui-serif, Georgia, serif;
+    letter-spacing: -0.015em;
+    font-feature-settings: "ss01", "ss02";
+  }
+
+  /* Custom scrollbar to match the warm palette */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--color-primary) 35%, transparent);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--color-primary) 55%, transparent);
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  /* Premium button effects */
+  .btn-shine {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .btn-shine::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      120deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.25) 50%,
+      transparent 70%
+    );
+    transform: translateX(-100%);
+    transition: transform 0.7s var(--ease-cafe);
+    pointer-events: none;
+  }
+  .btn-shine:hover::after {
+    transform: translateX(100%);
+  }
+
+  /* Warm grainy noise overlay (no images required) */
+  .bg-grain {
+    background-image:
+      radial-gradient(at 0% 0%, rgba(111, 78, 55, 0.08), transparent 50%),
+      radial-gradient(at 100% 100%, rgba(212, 165, 116, 0.12), transparent 50%);
+  }
+
+  .bg-noise {
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.18  0 0 0 0 0.12  0 0 0 0 0.08  0 0 0 0.22 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-size: 200px 200px;
+  }
+
+  /* Gentle floating animation for hero ornaments */
+  @keyframes float-slow {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    50%      { transform: translateY(-12px) rotate(1.5deg); }
+  }
+  .animate-float-slow { animation: float-slow 9s var(--ease-cafe) infinite; }
+
+  /* Chatbot button pulse — three rings */
+  @keyframes ring-pulse {
+    0%   { transform: scale(1);   opacity: 0.5; }
+    100% { transform: scale(1.8); opacity: 0;   }
+  }
+  .ring-pulse::before,
+  .ring-pulse::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background-color: var(--color-primary);
+    opacity: 0.4;
+    animation: ring-pulse 2.4s var(--ease-cafe) infinite;
+  }
+  .ring-pulse::after {
+    animation-delay: 1.2s;
+  }
+
+  /* Typing dots */
+  @keyframes typing-dot {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30%           { transform: translateY(-4px); opacity: 1; }
+  }
+  .dot-1 { animation: typing-dot 1.2s ease-in-out infinite; }
+  .dot-2 { animation: typing-dot 1.2s ease-in-out 0.15s infinite; }
+  .dot-3 { animation: typing-dot 1.2s ease-in-out 0.30s infinite; }
 }
