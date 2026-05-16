@@ -4,6 +4,7 @@ import { About } from "@/components/site/about";
 import { Menu } from "@/components/site/menu";
 import { Beans } from "@/components/site/beans";
 import { Visit } from "@/components/site/visit";
+import { Footer } from "@/components/site/footer";
 
 export default function Home() {
   return (
@@ -16,6 +17,7 @@ export default function Home() {
         <Beans />
         <Visit />
       </main>
+      <Footer />
     </>
   );
 }
