@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter } from "next/font/google";
 import { Toaster } from "sonner";
+import { ChatLauncher } from "@/components/chat/chat-launcher";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -39,6 +40,7 @@ export default function RootLayout({
     <html lang="en" className={`${fraunces.variable} ${inter.variable}`}>
       <body className="min-h-screen bg-background text-foreground antialiased">
         {children}
+        <ChatLauncher />
         <Toaster
           position="bottom-left"
           toastOptions={{
