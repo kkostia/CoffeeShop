@@ -1,8 +1,10 @@
 # Bramble & Brew — client brief
 
-> **Live demo:** _(coming after Vercel deploy lands)_
+> **Live demo:** https://coffee-shop-three-coral.vercel.app
 > **Source:** https://github.com/kkostia/CoffeeShop
-> **Admin password:** `demo123`
+> **Admin:** https://coffee-shop-three-coral.vercel.app/admin · password `demo123`
+
+Stripe is in **test mode** — pay with `4242 4242 4242 4242`, any future expiry, any CVC. Every order lands in `/admin` via signed webhook.
 
 A single-page marketing site for a fictional Galway coffee shop, paired with an embedded AI assistant that takes real cupping bookings and real Stripe payments — end to end, persisted to a real database, surfaced on a real admin dashboard.
 

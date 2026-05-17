@@ -2,7 +2,9 @@
 
 > Slow coffee. Real conversations.
 
-A portfolio demo site for a fictional third-wave coffee shop in Galway's Latin Quarter. Built to showcase modern web craft alongside a polished, production-shaped AI chatbot that small-business clients would actually pay for.
+**Live demo:** https://coffee-shop-three-coral.vercel.app · **Admin:** [/admin](https://coffee-shop-three-coral.vercel.app/admin) (`demo123`)
+
+A portfolio demo site for a fictional third-wave coffee shop in Galway's Latin Quarter. Built to showcase modern web craft alongside a polished, production-shaped AI chatbot that small-business clients would actually pay for. **Stripe runs in test mode** — pay with `4242 4242 4242 4242` and every order lands in `/admin` via a signed webhook.
 
 ## What's interesting
 
