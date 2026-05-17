@@ -30,8 +30,9 @@ export function getStripe(): Stripe {
 }
 
 export function appUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
-    "http://localhost:3000"
-  );
+  // Treat empty string the same as unset — Vercel creates the env var as ""
+  // when you leave the value blank, which would otherwise short-circuit the
+  // ?? fallback and produce a relative success_url that Stripe rejects.
+  const fromEnv = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+  return fromEnv || "http://localhost:3000";
 }
