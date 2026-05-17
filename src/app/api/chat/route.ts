@@ -1,9 +1,14 @@
 import { NextRequest } from "next/server";
+import { openai } from "@ai-sdk/openai";
+import { stepCountIs, streamText, type ModelMessage } from "ai";
+import { buildSystemPrompt } from "@/lib/chat/system-prompt";
 import { generateStubReply } from "@/lib/chat/responder";
+import { chatTools } from "@/lib/chat/tools";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { ChatRequest } from "@/lib/chat/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 const STUB_CHUNK_DELAY_MS = 18;
 
@@ -20,13 +25,42 @@ export async function POST(req: NextRequest) {
   }
 
   const hasOpenAi = Boolean(process.env.OPENAI_API_KEY);
-  // TODO(opana): when OPENAI_API_KEY is set, swap this branch to
-  // streamText + tools using @ai-sdk/openai. The wire format stays the same
-  // (plain text chunks), so the client doesn't change.
-  const replyText = hasOpenAi
-    ? generateStubReply(body.messages) // placeholder until real wiring
-    : generateStubReply(body.messages);
 
+  // ─── Real AI path ─────────────────────────────────────────────────────
+  if (hasOpenAi) {
+    const modelMessages = toModelMessages(body.messages);
+
+    const result = streamText({
+      model: openai("gpt-4o-mini"),
+      system: buildSystemPrompt(),
+      messages: modelMessages,
+      tools: chatTools,
+      // Allow the model to take a tool call + a follow-up text turn in one request.
+      stopWhen: stepCountIs(5),
+      temperature: 0.6,
+      maxOutputTokens: 400,
+      onFinish: async (event) => {
+        try {
+          await saveTurn(body.sessionId, body.messages, event.text);
+        } catch (err) {
+          console.error("[chat] persist failed (ai path):", err);
+        }
+      },
+    });
+
+    return result.toTextStreamResponse({
+      headers: {
+        "Cache-Control": "no-store, no-transform",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  }
+
+  // ─── Stub fallback (no OPENAI_API_KEY set) ───────────────────────────
+  // Keeps local dev usable without an OpenAI key. Pattern-matches intent
+  // and streams the same plain-text format the AI path returns, so the
+  // client behaves identically.
+  const replyText = generateStubReply(body.messages);
   const encoder = new TextEncoder();
   const words = replyText.split(/(\s+)/);
 
@@ -44,9 +78,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Fire-and-forget persistence so the stream isn't blocked.
-  void persistConversation(body, replyText).catch((err) => {
-    console.error("[chat] failed to persist conversation:", err);
+  void saveTurn(body.sessionId, body.messages, replyText).catch((err) => {
+    console.error("[chat] persist failed (stub path):", err);
   });
 
   return new Response(stream, {
@@ -58,35 +91,57 @@ export async function POST(req: NextRequest) {
   });
 }
 
-async function persistConversation(body: ChatRequest, reply: string) {
+// Map our wire-shape messages into the AI SDK's discriminated ModelMessage union.
+function toModelMessages(
+  messages: ChatRequest["messages"],
+): ModelMessage[] {
+  return messages.map((m) => {
+    switch (m.role) {
+      case "user":
+        return { role: "user", content: m.content };
+      case "assistant":
+        return { role: "assistant", content: m.content };
+      case "system":
+        return { role: "system", content: m.content };
+    }
+  });
+}
+
+// Single persistence path shared by AI + stub branches.
+async function saveTurn(
+  sessionId: string,
+  history: ChatRequest["messages"],
+  replyText: string,
+) {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return;
   const supabase = supabaseAdmin();
   const now = new Date().toISOString();
   const fullMessages = [
-    ...body.messages,
-    { role: "assistant" as const, content: reply, ts: now },
+    ...history.map((m) => ({ role: m.role, content: m.content })),
+    { role: "assistant" as const, content: replyText, ts: now },
   ];
 
-  const { data: existing } = await supabase
+  const { data: existing, error: selectErr } = await supabase
     .from("conversations")
-    .select("id, started_at")
-    .eq("session_id", body.sessionId)
+    .select("id")
+    .eq("session_id", sessionId)
     .maybeSingle();
 
+  if (selectErr) throw selectErr;
+
   if (existing) {
-    await supabase
+    const { error } = await supabase
       .from("conversations")
-      .update({
-        messages: fullMessages,
-        last_message_at: now,
-      })
+      .update({ messages: fullMessages, last_message_at: now })
       .eq("id", existing.id);
+    if (error) throw error;
   } else {
-    await supabase.from("conversations").insert({
-      session_id: body.sessionId,
+    const { error } = await supabase.from("conversations").insert({
+      session_id: sessionId,
       started_at: now,
       last_message_at: now,
       messages: fullMessages,
     });
+    if (error) throw error;
   }
 }
