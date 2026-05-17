@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { beans, cafe } from "@/lib/cafe-data";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { createBeanCheckout } from "./checkout-stub";
+import { createBeanCheckout } from "@/lib/stripe/create-bean-checkout";
 
 // Build the bean-name enum from cafe-data so the model can only pick a real
 // bean we actually sell. cast is safe — beans is non-empty by construction.
@@ -117,18 +117,27 @@ export const chatTools = {
         };
       }
       try {
-        const { url, session_id } = await createBeanCheckout({
-          bean_name,
-          size_grams,
-          quantity,
-          unit_price_cents: Math.round(size.price * 100),
+        const result = await createBeanCheckout({
+          line_items: [
+            {
+              bean_id: bean.id,
+              size_grams,
+              quantity,
+            },
+          ],
+          source: "chat-tool",
         });
         return {
           success: true as const,
-          checkout_url: url,
-          checkout_session_id: session_id,
+          checkout_url: result.url,
+          checkout_session_id: result.session_id,
           line_item: `${quantity} × ${bean.name} ${size_grams}g`,
-          subtotal_eur: (size.price * quantity).toFixed(2),
+          subtotal_eur: (result.subtotal_cents / 100).toFixed(2),
+          shipping_eur: (result.shipping_cents / 100).toFixed(2),
+          total_eur: (result.total_cents / 100).toFixed(2),
+          // Hint for the model — share the URL clearly as a clickable link.
+          guidance:
+            "Reply briefly. Share checkout_url as a clickable link. Mention email confirmation once payment clears.",
         };
       } catch (err) {
         console.error("[tool:initiate_bean_order] checkout failed:", err);
