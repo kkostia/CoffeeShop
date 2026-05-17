@@ -17,17 +17,25 @@ const inter = Inter({
   display: "swap",
 });
 
+// Derived from NEXT_PUBLIC_APP_URL when set (Vercel + prod) so canonical /
+// Open Graph URLs match the deployed domain. Falls back to a sensible
+// placeholder for local builds where the env var isn't set.
+const SITE_URL =
+  process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
+  "https://bramble-and-brew.vercel.app";
+
 export const metadata: Metadata = {
   title: "Bramble & Brew — Slow coffee. Real conversations. | Galway",
   description:
     "Third-wave specialty coffee in Galway's Latin Quarter. Single-origin pour overs, house-roasted beans, and weekend cupping sessions.",
-  metadataBase: new URL("https://bramble-and-brew.vercel.app"),
+  metadataBase: new URL(SITE_URL),
   openGraph: {
     title: "Bramble & Brew — Galway specialty coffee",
     description:
       "Slow coffee, house-roasted beans, and a cozy reading nook on Quay Street.",
     type: "website",
     locale: "en_IE",
+    url: SITE_URL,
   },
 };
 
