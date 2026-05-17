@@ -1,54 +1,88 @@
-# Bramble & Brew — portfolio brief
+# Bramble & Brew — client brief
 
-A single-page marketing site for a fictional Galway coffee shop, paired with a polished embedded AI assistant that handles real bookings and orders. Built end-to-end as a demo of what a small-business client can buy: a beautiful website *and* a chatbot that captures business value, not just clicks.
+> **Live demo:** _(coming after Vercel deploy lands)_
+> **Source:** https://github.com/kkostia/CoffeeShop
+> **Admin password:** `demo123`
 
----
+A single-page marketing site for a fictional Galway coffee shop, paired with an embedded AI assistant that takes real cupping bookings and real Stripe payments — end to end, persisted to a real database, surfaced on a real admin dashboard.
 
-## The business problem this solves
-
-Most small-business websites are static brochures: hours, menu, phone number. They convert visitors into "people who know where you are." That's it.
-
-Bramble & Brew adds one thing on top of a beautifully crafted marketing site — an AI assistant that:
-
-- Knows the entire menu, beans, hours, and FAQs by heart (no stale answers).
-- Books cupping sessions and takes bean orders end-to-end via OpenAI tool calls.
-- Persists every conversation, booking, and order to a Supabase database.
-- Surfaces all of it on a hidden `/admin` dashboard so the owner sees the captured revenue.
-
-That's the pitch to a real-world café, dentist, gym, hair salon: *"Same website, but the chatbot makes you money while you sleep."*
+It's the pitch deck for "AI that pays for itself," in working form.
 
 ---
 
-## Technical highlights to talk about in client calls
+## The business pitch
 
-### 1. Single source of truth keeps the bot honest
+Most small-business websites do one job: tell visitors where you are and when you're open. Then they sit there.
 
-`src/lib/cafe-data.ts` is the only place the menu, beans, and hours are defined. Both the on-page UI **and** the chatbot's system prompt are generated from it. When the price of a flat white changes, both surfaces change with one edit. The bot can never quote a price the menu doesn't show.
+Bramble & Brew adds one capability on top of a well-crafted marketing site: an AI assistant that **books cupping sessions** and **takes bean orders via Stripe** without the owner lifting a finger. Every conversation, booking, and order is captured and shown on a `/admin` dashboard so the owner can see captured revenue at a glance.
 
-### 2. Streaming chat over a tiny custom protocol
+That's the conversation with a café, gym, dentist, hair salon, photographer: *"Same beautiful website you'd pay anyone for — but the assistant makes you money while you sleep."*
 
-The chat panel reads `/api/chat` as a `ReadableStream<Uint8Array>` of plain text chunks. No SDK lock-in on the client. When `OPENAI_API_KEY` is set the route swaps the stub for `streamText` from the Vercel AI SDK + tool calls — the wire format doesn't change, so the client stays put.
+---
 
-### 3. Tool calls as the demo's centerpiece
+## What this demonstrates technically
 
-`book_cupping_session` and `place_bean_order` are OpenAI function calls. The model collects the required fields conversationally, confirms back, then invokes the tool. The tool handler inserts into Supabase (`cupping_bookings`, `bean_orders`) and returns a confirmation the model speaks back to the user. End result: a real row in the database without a single form.
+### 1. End-to-end OpenAI tool use (function calling)
 
-### 4. CTAs everywhere open the chatbot — with prefill
+`gpt-4o-mini` with the Vercel AI SDK v6. Two tools, strictly typed with Zod input schemas:
 
-A small custom event bus (`lib/chat/bus.ts`) lets the "Chat with us" hero CTA and the "Book a cupping session" Visit CTA call `openChat("I'd like to book a cupping session")`. The launcher subscribes, opens, and pre-fills the input. No prop drilling, no global store, no React Context.
+- `book_cupping_session(name, email, party_size, session_date)` → row in `cupping_bookings`
+- `initiate_bean_order(bean_name, size_grams, quantity)` → real Stripe Checkout session
 
-### 5. The admin view proves business value
+The model collects details conversationally, confirms before invoking the tool (except for orders, where Stripe handles email/shipping), then speaks the result back naturally. `stopWhen: stepCountIs(5)` lets a tool roundtrip + follow-up text happen in one streaming response.
 
-`/admin` (password-gated, demo password `demo123`) shows:
-- Conversations from the last 7 days, click-to-expand into a full transcript modal
-- All-time cupping bookings table
-- All-time bean orders table
+Today's date is anchored into the system prompt at request time so the model resolves "next Sunday" correctly despite its 2024-ish knowledge cutoff.
 
-When you walk a prospective client through this page, the conversation lands differently. "Here's where the money shows up" sells better than "here's the chat widget."
+### 2. Stripe Checkout integration with proper webhook handling
 
-### 6. Custom warm design system, no off-the-shelf shadcn defaults
+- `/api/checkout` — Zod-validated cart, **server-trusted prices** (looked up from `cafe-data.ts`, never read from the client). EU + UK shipping address collection. Free shipping over €30, otherwise €4.95 flat — server-decided, not customer-picked. Metadata packed with line-item JSON for the webhook to read back without re-fetching.
+- `/api/webhooks/stripe` — HMAC signature verified with `stripe.webhooks.constructEvent` over the raw request body. Idempotent insert into `bean_orders` (`stripe_session_id` UNIQUE; pre-checked to avoid noisy retries). Handles `checkout.session.completed` and `payment_intent.payment_failed`. Returns 500 on transient DB failures so Stripe retries with backoff.
+- `/order/success` — server component that **re-verifies the session with Stripe** before rendering. Refuses to render unless `payment_status === "paid"`.
+- One factory (`src/lib/stripe/create-bean-checkout.ts`) builds the Checkout session from both the **beans card** and the **chatbot tool** — shipping rules, prices, and metadata shape live in exactly one file.
 
-Tailwind v4 `@theme` block with hand-picked coffee tones (`#FAF7F2` cream, `#6F4E37` saddle brown, `#D4A574` warm tan). Fraunces serif for display headlines, Inter for body. Custom `.btn-shine`, `.ring-pulse`, `.bg-noise` utilities. Section reveals on scroll with Framer Motion `whileInView`. Doesn't look like every other AI-generated site.
+### 3. Real database with row-level security
+
+Supabase Postgres, three tables, all RLS-enabled:
+
+- `conversations` (transcripts, jsonb messages) — anon can `INSERT`; `UPDATE` only when `session_id` matches an `x-session-id` request header (uses `current_setting('request.headers', true)::jsonb`).
+- `cupping_bookings` — anon `INSERT` allowed, no `SELECT`.
+- `bean_orders` — service-role only. RLS enabled with zero anon policies = full deny.
+
+Cents-based money math (no floats), auto-bumping `updated_at` trigger, JSONB shipping address + line items so each row stands on its own.
+
+### 4. Streaming AI responses with proper error handling
+
+`streamText` from the AI SDK with `result.textStream` piped through a manual `ReadableStream` — catches provider errors (`insufficient_quota`, `invalid_api_key`, rate limit) mid-stream and surfaces them as a friendly sentence in the chat bubble instead of an empty response. The error message strings are tuned per error class.
+
+### 5. Production-quality UI/UX, no off-the-shelf shadcn
+
+- Hand-picked coffee palette in Tailwind v4 `@theme` block (`#FAF7F2` cream, `#6F4E37` saddle brown, `#D4A574` warm tan) — defined once, used everywhere.
+- Fraunces (variable serif, `opsz` axis) for display, Inter for body.
+- Custom utilities: `.btn-shine` (diagonal hover pass), `.ring-pulse` (double-ring chat button pulse), `.bg-noise` (inline-SVG noise overlay).
+- Framer Motion scroll reveals with a shared easing token (`--ease-cafe: cubic-bezier(0.22, 1, 0.36, 1)`).
+- Mobile chat is a full-screen takeover; desktop is a floating panel. Same component.
+
+### 6. Admin dashboard with click-to-expand detail
+
+`/admin` (password gate, timing-safe equality check, `sessionStorage`-cached auth) shows:
+
+- **Conversations** (last 7 days) — click any card for the full transcript in a modal.
+- **Cupping bookings** — table with status badges.
+- **Bean orders** (last 30 days) — table with revenue summary at the top; row click opens an `OrderModal` with full line items, shipping address, and **deep links into the Stripe dashboard** for both the Checkout Session and the Payment Intent (auto-detects test vs live from the ID prefix).
+
+---
+
+## Adaptation timeline (rebrand to a different business)
+
+| Change | Files touched | Time |
+|---|---|---|
+| Cafe → dentist / salon / gym | `src/lib/cafe-data.ts` (one file) — menu/services, hours, FAQs, location | 30 min |
+| Palette + fonts | `src/app/globals.css` `@theme` block + `layout.tsx` `next/font` imports | 30 min |
+| Tools (booking / order) → new domain (appointments, classes, products) | `src/lib/chat/tools.ts` zod schemas + execute bodies; matching DB tables in `supabase/migrations/` | 2–4 hrs |
+| Section copy + section structure | `src/components/site/*` — hero, about, menu, beans, visit | 2–4 hrs |
+| Redeploy on Vercel | env vars + Stripe webhook URL update | 30 min |
+
+**Realistic delivery for a new client: 1–2 days from briefing call to live demo URL.**
 
 ---
 
@@ -56,28 +90,55 @@ Tailwind v4 `@theme` block with hand-picked coffee tones (`#FAF7F2` cream, `#6F4
 
 | Layer | Choice | Why |
 |---|---|---|
-| Framework | Next.js 14 App Router | SSR-ready, route handlers for the chat API, App Router file conventions |
-| Language | TypeScript strict | catch the silly stuff at build time |
-| Styling | Tailwind v4 (`@theme` in CSS) | config-in-CSS, no `tailwind.config.ts` to maintain |
-| Animation | Framer Motion | scroll reveals + chat panel transitions |
-| AI | Vercel AI SDK v6 + OpenAI `gpt-4o-mini` | cheap, fast, plenty for this — tool calls work great |
-| DB | Supabase (postgres) | row-level security, free tier, easy to demo |
-| UI atoms | Radix primitives + custom | accessibility for free, look custom |
-| Icons | Lucide React | clean, tree-shakable |
-| Toasts | Sonner | one-line installs, gorgeous out of the box |
-| Hosting | Vercel | zero-config Next.js, edge functions free |
+| Framework | Next.js 14 App Router | Route handlers for chat/checkout/webhook, server components for /order/success, static rendering for /admin shell |
+| Language | TypeScript strict | Zod schemas + Stripe typed events catch the silly stuff at build time |
+| Styling | Tailwind v4 config-in-CSS | No `tailwind.config.ts` to maintain — theme lives in `globals.css` |
+| AI | Vercel AI SDK v6 + `gpt-4o-mini` | Cheap, fast, plenty for this — tool calls work great |
+| Payments | Stripe Checkout (hosted) + webhooks | PCI scope minimization; Stripe owns the card form |
+| DB | Supabase (postgres) | RLS for free, generous free tier, easy to demo |
+| Animation | Framer Motion | Scroll reveals, AnimatePresence for the chat panel |
+| Atoms | Radix primitives, Lucide icons, Sonner, Vaul | Accessibility for free, look custom |
+| Hosting | Vercel | Zero-config Next.js, signed webhook URLs work over Edge Network |
+
+---
+
+## Code organization highlights
+
+```
+src/
+  app/
+    api/
+      chat/          # streamText + tools + Supabase persistence
+      checkout/      # Zod-validated cart → Stripe URL
+      webhooks/stripe/   # HMAC-verified, idempotent
+      admin/data/    # password-gated, scoped queries
+    admin/page.tsx   # transcripts + bookings + orders dashboard
+    order/success/   # server-verified thank-you
+  components/
+    site/            # nav / hero / about / menu / beans / visit / footer
+    chat/            # launcher / panel / bubbles / typing indicator
+    ui/              # button / card / badge / input / tabs / section / logo
+  lib/
+    cafe-data.ts     # SINGLE SOURCE OF TRUTH
+    chat/            # bus, storage, system-prompt, responder (stub), tools, types
+    stripe/          # client (singleton), create-bean-checkout (shared factory)
+    supabase/        # browser client + service-role admin
+supabase/
+  migrations/0001_init.sql
+```
 
 ---
 
 ## What's intentionally NOT in this build
 
-- **No customer auth.** This is a marketing site, not a SaaS — the chatbot keeps its identity per browser via a `session_id` in localStorage.
-- **No real Stripe.** "Add to bag" is a visual delight (toast confirmation) — real checkout is scope-creep for a portfolio piece.
+- **No customer auth.** The chatbot keeps identity per browser via a `session_id` in localStorage.
 - **No fabricated testimonials or reviews.** Can't ethically invent customers.
-- **No stock photography.** Every visual is CSS — warm gradients, dotted menu lines, gradient bean-bag headers. Makes it clear nothing is borrowed.
+- **No stock photography.** Warm gradients, dotted menu lines, gradient bean-bag headers — every visual is CSS so nothing looks borrowed.
 
 ---
 
 ## Commit history reads as the build
 
-The git log walks through the build feature by feature — `chore: scaffold` → `feat(ui)` → `feat(nav)` → `feat(hero)` → `feat(about)` → `feat(menu)` → `feat(beans)` → `feat(visit)` → `feat(footer)` → `feat(chat)` → `feat(admin)`. Recruiter-friendly.
+`feat(db)` → `feat(ui)` → `feat(nav)` → `feat(hero)` → `feat(about)` → `feat(menu)` → `feat(beans)` → `feat(visit)` → `feat(footer)` → `feat(chat)` → `feat(admin)` → `fix(chat): error visibility + date anchor` → `feat(stripe)` → `feat(beans): purchasable` → `feat(chat): wire bean order tool to Stripe` → `feat(stripe): webhook` → `feat(orders): success page + admin orders tab` → `docs: stripe local testing`.
+
+Walks straight through the build. Recruiter-friendly.
