@@ -29,7 +29,12 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = supabaseAdmin();
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const sevenDaysAgo = new Date(
+    Date.now() - 7 * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const thirtyDaysAgo = new Date(
+    Date.now() - 30 * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
   const [convosRes, bookingsRes, ordersRes] = await Promise.all([
     supabase
@@ -43,9 +48,11 @@ export async function POST(req: NextRequest) {
       .select("*")
       .order("created_at", { ascending: false })
       .limit(100),
+    // Orders: last 30 days, per spec.
     supabase
       .from("bean_orders")
       .select("*")
+      .gte("created_at", thirtyDaysAgo)
       .order("created_at", { ascending: false })
       .limit(100),
   ]);

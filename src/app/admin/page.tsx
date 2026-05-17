@@ -4,8 +4,10 @@ import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   CalendarDays,
+  ExternalLink,
   Lock,
   LogOut,
+  MapPin,
   MessageSquare,
   Package,
   RefreshCcw,
@@ -15,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Logo } from "@/components/ui/logo";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatEUR } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 interface Conversation {
   id: string;
@@ -35,16 +37,40 @@ interface CuppingBooking {
   created_at: string;
 }
 
-interface BeanOrder {
-  id: string;
-  name: string;
-  email: string;
-  address: string;
+interface OrderLineItem {
+  bean_id?: string;
   bean_name: string;
   size_grams: number;
-  price: number;
-  status: string;
+  quantity: number;
+  unit_price_cents: number;
+}
+
+interface ShippingAddress {
+  line1?: string | null;
+  line2?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+  state?: string | null;
+  country?: string | null;
+}
+
+interface BeanOrder {
+  id: string;
+  stripe_session_id: string;
+  stripe_payment_intent_id: string | null;
+  customer_email: string;
+  customer_name: string | null;
+  shipping_address: ShippingAddress | null;
+  line_items: OrderLineItem[];
+  subtotal_cents: number;
+  shipping_cents: number;
+  total_cents: number;
+  currency: string;
+  status: "pending" | "paid" | "failed" | "refunded" | "shipped";
+  metadata: Record<string, string> | null;
   created_at: string;
+  paid_at: string | null;
+  updated_at: string;
 }
 
 interface AdminData {
@@ -64,6 +90,7 @@ export default function AdminPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [data, setData] = React.useState<AdminData | null>(null);
   const [openConvo, setOpenConvo] = React.useState<Conversation | null>(null);
+  const [openOrder, setOpenOrder] = React.useState<BeanOrder | null>(null);
 
   const fetchData = React.useCallback(async (pw: string) => {
     setLoading(true);
@@ -221,9 +248,9 @@ export default function AdminPage() {
         />
         <Stat
           icon={Package}
-          label="Bean orders"
+          label="Bean orders (30d)"
           value={data?.beanOrders.length ?? 0}
-          sub="all-time"
+          sub={`${revenueEUR(data?.beanOrders ?? [])} revenue`}
         />
       </section>
 
@@ -267,11 +294,11 @@ export default function AdminPage() {
 
         <TabsContent value="orders">
           {data?.beanOrders.length ? (
-            <OrdersTable rows={data.beanOrders} />
+            <OrdersTable rows={data.beanOrders} onOpen={setOpenOrder} />
           ) : (
             <EmptyState
               title="No bean orders yet"
-              body="When the chatbot takes a bean delivery, it lands here."
+              body="When a customer completes Stripe checkout (from the beans card or the chatbot), the order lands here."
             />
           )}
         </TabsContent>
@@ -283,6 +310,9 @@ export default function AdminPage() {
             convo={openConvo}
             onClose={() => setOpenConvo(null)}
           />
+        ) : null}
+        {openOrder ? (
+          <OrderModal order={openOrder} onClose={() => setOpenOrder(null)} />
         ) : null}
       </AnimatePresence>
     </main>
@@ -449,37 +479,272 @@ function BookingsTable({ rows }: { rows: CuppingBooking[] }) {
   );
 }
 
-function OrdersTable({ rows }: { rows: BeanOrder[] }) {
+function OrdersTable({
+  rows,
+  onOpen,
+}: {
+  rows: BeanOrder[];
+  onOpen: (order: BeanOrder) => void;
+}) {
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card">
       <table className="w-full text-left text-sm">
         <thead className="bg-muted/60 text-xs uppercase tracking-[0.14em] text-muted-foreground">
           <tr>
+            <Th>Order</Th>
             <Th>Customer</Th>
-            <Th>Bean</Th>
-            <Th>Size</Th>
-            <Th>Price</Th>
+            <Th>Items</Th>
+            <Th>Total</Th>
             <Th>Status</Th>
             <Th>Placed</Th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id} className="border-t border-border">
-              <Td>
-                <div className="font-medium">{r.name}</div>
-                <div className="text-xs text-muted-foreground">{r.email}</div>
+            <tr
+              key={r.id}
+              onClick={() => onOpen(r)}
+              className="cursor-pointer border-t border-border transition-colors hover:bg-muted/40"
+            >
+              <Td className="font-mono text-xs text-foreground">
+                #{shortRef(r.stripe_session_id)}
               </Td>
-              <Td>{r.bean_name}</Td>
-              <Td>{r.size_grams}g</Td>
-              <Td className="tabular-nums">{formatEUR(r.price)}</Td>
-              <Td><StatusBadge status={r.status} /></Td>
-              <Td className="text-muted-foreground">{formatRelative(r.created_at)}</Td>
+              <Td>
+                <div className="font-medium">{r.customer_name ?? "—"}</div>
+                <div className="text-xs text-muted-foreground">
+                  {r.customer_email}
+                </div>
+              </Td>
+              <Td className="text-muted-foreground">
+                {summarizeLineItems(r.line_items)}
+              </Td>
+              <Td className="font-display tabular-nums text-foreground">
+                {formatCents(r.total_cents, r.currency)}
+              </Td>
+              <Td>
+                <StatusBadge status={r.status} />
+              </Td>
+              <Td className="text-muted-foreground">
+                {formatRelative(r.created_at)}
+              </Td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function OrderModal({
+  order,
+  onClose,
+}: {
+  order: BeanOrder;
+  onClose: () => void;
+}) {
+  return (
+    <motion.div
+      key="order-modal"
+      className="fixed inset-0 z-50 flex items-end justify-center md:items-center"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <div
+        className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <motion.div
+        initial={{ y: 32, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 32, opacity: 0 }}
+        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+        className="relative m-3 flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-border bg-card shadow-2xl"
+      >
+        <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="min-w-0">
+            <p className="font-display text-lg">
+              Order #{shortRef(order.stripe_session_id)}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              {order.customer_email} ·{" "}
+              {order.paid_at
+                ? `paid ${formatRelative(order.paid_at)}`
+                : `created ${formatRelative(order.created_at)}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <StatusBadge status={order.status} />
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={onClose}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-muted"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+          {/* Line items */}
+          <section>
+            <p className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              Line items
+            </p>
+            <ul className="divide-y divide-border rounded-2xl border border-border">
+              {order.line_items.map((li, i) => (
+                <li
+                  key={`${li.bean_id ?? li.bean_name}-${i}`}
+                  className="flex items-center justify-between px-4 py-3 text-sm"
+                >
+                  <div>
+                    <p className="font-medium text-foreground">
+                      {li.bean_name} · {li.size_grams}g
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {li.quantity} ×{" "}
+                      {formatCents(li.unit_price_cents, order.currency)}
+                    </p>
+                  </div>
+                  <span className="font-display tabular-nums text-foreground">
+                    {formatCents(
+                      li.unit_price_cents * li.quantity,
+                      order.currency,
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            <dl className="mt-3 space-y-1 text-sm">
+              <ModalRow
+                label="Subtotal"
+                value={formatCents(order.subtotal_cents, order.currency)}
+              />
+              <ModalRow
+                label="Shipping"
+                value={
+                  order.shipping_cents === 0
+                    ? "Free"
+                    : formatCents(order.shipping_cents, order.currency)
+                }
+              />
+              <ModalRow
+                label={<strong className="text-foreground">Total</strong>}
+                value={
+                  <strong className="font-display text-base text-primary">
+                    {formatCents(order.total_cents, order.currency)}
+                  </strong>
+                }
+              />
+            </dl>
+          </section>
+
+          {/* Shipping address */}
+          <section>
+            <p className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              <MapPin className="h-3 w-3 text-primary" />
+              Shipping address
+            </p>
+            {order.shipping_address ? (
+              <address className="rounded-2xl border border-border bg-muted/30 px-4 py-3 not-italic text-sm leading-relaxed text-foreground">
+                {order.customer_name ? (
+                  <>
+                    {order.customer_name}
+                    <br />
+                  </>
+                ) : null}
+                {order.shipping_address.line1}
+                {order.shipping_address.line2 ? (
+                  <>
+                    <br />
+                    {order.shipping_address.line2}
+                  </>
+                ) : null}
+                <br />
+                {[
+                  order.shipping_address.city,
+                  order.shipping_address.postal_code,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+                <br />
+                {order.shipping_address.country}
+              </address>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No shipping address captured.
+              </p>
+            )}
+          </section>
+
+          {/* Stripe references */}
+          <section>
+            <p className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              Stripe
+            </p>
+            <div className="space-y-2 text-sm">
+              <StripeLinkRow
+                label="Checkout Session"
+                id={order.stripe_session_id}
+                href={stripeDashboardUrl(order.stripe_session_id, "session")}
+              />
+              {order.stripe_payment_intent_id ? (
+                <StripeLinkRow
+                  label="Payment Intent"
+                  id={order.stripe_payment_intent_id}
+                  href={stripeDashboardUrl(
+                    order.stripe_payment_intent_id,
+                    "payment",
+                  )}
+                />
+              ) : null}
+            </div>
+          </section>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function ModalRow({
+  label,
+  value,
+}: {
+  label: React.ReactNode;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function StripeLinkRow({
+  label,
+  id,
+  href,
+}: {
+  label: string;
+  id: string;
+  href: string;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 px-3 py-2 transition-colors hover:border-primary/40 hover:bg-muted/60"
+    >
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="flex items-center gap-1.5 font-mono text-xs text-foreground">
+        <span className="max-w-[280px] truncate">{id}</span>
+        <ExternalLink className="h-3 w-3 shrink-0 text-primary" />
+      </span>
+    </a>
   );
 }
 
@@ -499,17 +764,24 @@ function Td({
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
+    // bookings
     pending: "border-accent/40 bg-accent/20 text-foreground",
     confirmed: "border-success/40 bg-success/15 text-success",
+    cancelled: "border-border bg-muted text-muted-foreground",
+    // orders
+    paid: "border-success/40 bg-success/15 text-success",
     shipped: "border-primary/30 bg-primary/10 text-primary",
     delivered: "border-success/40 bg-success/15 text-success",
-    cancelled: "border-border bg-muted text-muted-foreground",
+    refunded: "border-border bg-muted text-muted-foreground",
+    failed:
+      "border-[#b65c47]/40 bg-[#b65c47]/12 text-[#7a3826]",
   };
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${
-        styles[status] ?? styles.pending
-      }`}
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs",
+        styles[status] ?? styles.pending,
+      )}
     >
       {status}
     </span>
@@ -523,6 +795,47 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <p className="mt-2 text-sm text-muted-foreground">{body}</p>
     </div>
   );
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────
+
+function formatCents(cents: number, currency = "eur"): string {
+  return new Intl.NumberFormat("en-IE", {
+    style: "currency",
+    currency: currency.toUpperCase(),
+  }).format(cents / 100);
+}
+
+function summarizeLineItems(items: OrderLineItem[]): string {
+  if (!items?.length) return "—";
+  const head = items
+    .slice(0, 2)
+    .map((li) => `${li.quantity}× ${li.bean_name} ${li.size_grams}g`)
+    .join(", ");
+  if (items.length <= 2) return head;
+  return `${head} +${items.length - 2} more`;
+}
+
+function shortRef(stripeId: string): string {
+  return stripeId
+    .replace(/^(cs|pi)_(test|live)_/, "")
+    .slice(0, 8)
+    .toUpperCase();
+}
+
+function revenueEUR(orders: BeanOrder[]): string {
+  const cents = orders
+    .filter((o) => o.status === "paid" || o.status === "shipped")
+    .reduce((sum, o) => sum + o.total_cents, 0);
+  return formatCents(cents, "eur");
+}
+
+function stripeDashboardUrl(id: string, kind: "session" | "payment"): string {
+  const isTest = id.includes("_test_");
+  const base = `https://dashboard.stripe.com${isTest ? "/test" : ""}`;
+  return kind === "session"
+    ? `${base}/payments?query=${id}` // session lookup goes through payments search
+    : `${base}/payments/${id}`;
 }
 
 function formatRelative(iso: string): string {
