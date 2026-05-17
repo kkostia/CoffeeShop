@@ -3,7 +3,7 @@
 import * as React from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { ShoppingBag } from "lucide-react";
+import { Loader2, ShoppingBag } from "lucide-react";
 import { Eyebrow, Section, SectionReveal } from "@/components/ui/section";
 import { Button } from "@/components/ui/button";
 import { beans, type Bean } from "@/lib/cafe-data";
@@ -40,11 +40,40 @@ export function Beans() {
 
 function BeanCard({ bean }: { bean: Bean }) {
   const [selectedSize, setSelectedSize] = React.useState(bean.sizes[1]!);
+  const [busy, setBusy] = React.useState(false);
 
-  const handleAdd = () => {
-    toast.success(`${bean.name} (${selectedSize.grams}g) added to bag`, {
-      description: `${formatEUR(selectedSize.price)} · ships within 7 days`,
-    });
+  const handleBuy = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          line_items: [
+            {
+              bean_id: bean.id,
+              size_grams: selectedSize.grams,
+              quantity: 1,
+            },
+          ],
+        }),
+      });
+      const data: { url?: string; error?: string } = await res.json();
+      if (!res.ok || !data.url) {
+        throw new Error(data.error ?? `checkout: ${res.status}`);
+      }
+      // Hand off to Stripe-hosted Checkout. We don't reset `busy` —
+      // the navigation away unmounts the component.
+      window.location.assign(data.url);
+    } catch (err) {
+      console.error(err);
+      toast.error("Couldn't open checkout", {
+        description:
+          "Something went wrong on our side — try again, or grab a bag in the shop.",
+      });
+      setBusy(false);
+    }
   };
 
   return (
@@ -129,9 +158,18 @@ function BeanCard({ bean }: { bean: Bean }) {
             <span className="font-display text-2xl tabular-nums text-primary">
               {formatEUR(selectedSize.price)}
             </span>
-            <Button size="sm" onClick={handleAdd}>
-              <ShoppingBag />
-              Add to bag
+            <Button
+              size="sm"
+              onClick={handleBuy}
+              disabled={busy}
+              aria-busy={busy}
+            >
+              {busy ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <ShoppingBag />
+              )}
+              {busy ? "Opening…" : "Buy now"}
             </Button>
           </div>
         </div>
