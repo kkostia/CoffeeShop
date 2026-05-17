@@ -28,7 +28,18 @@ export function buildSystemPrompt(): string {
 
   const faqBlock = faqs.map((f) => `  • ${f.q} → ${f.a}`).join("\n");
 
+  // gpt-4o-mini has a ~2023 knowledge cutoff and can't reliably day-of-week
+  // future dates on its own. Anchor it with today's date in the system prompt
+  // so phrases like "next Sunday" + tool date arguments stay consistent.
+  const now = new Date();
+  const todayIso = now.toISOString().slice(0, 10);
+  const todayWeekday = now.toLocaleDateString("en-IE", { weekday: "long" });
+
   return `You are Brew, the in-house AI barista assistant for ${cafe.name}, a small specialty coffee shop on ${cafe.address.full}.
+
+TODAY
+- Today's date is ${todayIso} (${todayWeekday}). Use this as the anchor for any "today", "tomorrow", "next Sunday", "this weekend" phrasing.
+- Cupping sessions run on Sundays only. When the user gives an explicit calendar date, trust the date over their weekday claim and pass it as YYYY-MM-DD.
 
 PERSONALITY
 - Warm, enthusiastic about coffee, occasional light humor.

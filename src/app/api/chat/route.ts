@@ -39,6 +39,11 @@ export async function POST(req: NextRequest) {
       stopWhen: stepCountIs(5),
       temperature: 0.6,
       maxOutputTokens: 400,
+      onError: ({ error }) => {
+        // AI SDK otherwise swallows provider errors and closes the stream
+        // silently — the chat bubble looks blank. Log it server-side.
+        console.error("[chat] streamText error:", error);
+      },
       onFinish: async (event) => {
         try {
           await saveTurn(body.sessionId, body.messages, event.text);
@@ -48,8 +53,27 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return result.toTextStreamResponse({
+    // Pipe textStream manually so we can catch provider errors mid-iteration
+    // (insufficient_quota, rate limit, bad key) and surface them as a
+    // friendly sentence in the chat bubble instead of an empty body.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          for await (const chunk of result.textStream) {
+            controller.enqueue(encoder.encode(chunk));
+          }
+        } catch (err) {
+          controller.enqueue(encoder.encode(describeProviderError(err)));
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
       headers: {
+        "Content-Type": "text/plain; charset=utf-8",
         "Cache-Control": "no-store, no-transform",
         "X-Accel-Buffering": "no",
       },
@@ -89,6 +113,27 @@ export async function POST(req: NextRequest) {
       "X-Accel-Buffering": "no",
     },
   });
+}
+
+// Turn an AI-SDK / provider error into a short, user-facing sentence.
+function describeProviderError(error: unknown): string {
+  const raw =
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string"
+      ? (error as { message: string }).message
+      : String(error);
+  if (/insufficient_quota|exceeded.*quota|billing/i.test(raw)) {
+    return "Brew is offline right now — the AI brain is out of credits. The team has been pinged.";
+  }
+  if (/invalid_api_key|incorrect api key|api key/i.test(raw)) {
+    return "Brew can't sign in right now — the AI key is misconfigured.";
+  }
+  if (/rate.?limit/i.test(raw)) {
+    return "We're getting a lot of questions at once — give Brew a few seconds and try again.";
+  }
+  return "Brew tripped on the way to answer — give it another go in a moment.";
 }
 
 // Map our wire-shape messages into the AI SDK's discriminated ModelMessage union.
